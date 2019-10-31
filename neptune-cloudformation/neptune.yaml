@@ -1,0 +1,145 @@
+Description: 'Amazon Neptune cluster'
+
+###############################################################################
+# Parameters 
+###############################################################################   
+Parameters:
+  ParentVPCStack:
+    Description: 'Provide Stack name of parent VPC stack.'
+    Type: String
+    MinLength: '1'
+    MaxLength: '128'
+    AllowedPattern: '^[a-zA-Z]+[0-9a-zA-Z\-]*$'
+  DBInstanceType:
+    Description: Neptune DB instance type
+    Type: String
+    Default: db.r4.xlarge
+    AllowedValues:
+      - db.r4.large
+      - db.r4.xlarge
+      - db.r4.2xlarge
+      - db.r5.large
+      - db.r5.xlarge
+      - db.r5.2xlarge
+    ConstraintDescription: Must be a valid Neptune instance type.
+  DBClusterPort:
+    Type: String
+    Default: '8182'
+    Description: Enter the port of your Neptune cluster
+  NeptuneQueryTimeout:
+    Type: Number
+    Default: 20000
+    Description: Neptune query timeout (in milliseconds)
+  NeptuneEnableAuditLog:
+    Type: Number
+    Default: 0
+    AllowedValues:
+      - 0
+      - 1
+    Description: Enable audit log. 0 means disable and 1 means enable.
+  IAMAuthEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable IAM auth for Neptune.
+
+###############################################################################
+# Resources 
+###############################################################################   
+
+Resources:
+  NeptuneClientSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      VpcId: 
+        'Fn::ImportValue': !Sub 'vpc-${ParentVPCStack}'
+      GroupDescription: Allow Access
+      SecurityGroupIngress:
+        - FromPort: '8182'
+          ToPort: '8182'
+          IpProtocol: tcp
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+      Tags:
+        - Key: Name
+          Value: Neptune client security group
+
+  NeptuneSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+      - NeptuneClientSecurityGroup
+    Properties:
+      VpcId: 
+        'Fn::ImportValue': !Sub 'vpc-${ParentVPCStack}'
+      GroupDescription: Allow Access
+      SecurityGroupIngress:
+        - FromPort: '8182'
+          ToPort: '8182'
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref NeptuneClientSecurityGroup
+          Description: HTTP access from Neptune client security group
+      Tags:
+        - Key: Name
+          Value: Neptune security group
+
+  NeptuneDBSubnetGroup:
+    Type: 'AWS::Neptune::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: Neptune DB subnet group
+      SubnetIds:
+        - {'Fn::ImportValue': !Sub 'subprivate1-${ParentVPCStack}'}
+        - {'Fn::ImportValue': !Sub 'subprivate2-${ParentVPCStack}'}
+      Tags:
+        - Key: Name
+          Value: Neptune DB subnet group
+
+  NeptuneDBClusterParameterGroup:
+    Type: 'AWS::Neptune::DBClusterParameterGroup'
+    Properties:
+      Family: neptune1
+      Description: 'cluster parameter group'
+      Parameters:
+        neptune_enable_audit_log: !Ref NeptuneEnableAuditLog
+      Tags:
+        - Key: Name
+          Value: Neptune DB cluster parameter group
+  NeptuneDBParameterGroup:
+    Type: 'AWS::Neptune::DBParameterGroup'
+    Properties:
+      Family: neptune1
+      Description: 'neptune DB parameter group'
+      Parameters:
+        neptune_query_timeout: !Ref NeptuneQueryTimeout
+      Tags:
+        - Key: Name
+          Value: Neptune DB parameter group
+  NeptuneDBCluster:
+    Type: 'AWS::Neptune::DBCluster'
+    Properties:
+      DBSubnetGroupName: !Ref NeptuneDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref NeptuneSecurityGroup
+      DBClusterIdentifier: 'test-neptune'
+      DBClusterParameterGroupName: !Ref NeptuneDBClusterParameterGroup
+      Port: !Ref DBClusterPort
+      IamAuthEnabled: !Ref IAMAuthEnabled
+      Tags:
+        - Key: Name
+          Value: Neptune DB cluster
+    DependsOn:
+      - NeptuneDBClusterParameterGroup
+  NeptuneDBInstance:
+    Type: 'AWS::Neptune::DBInstance'
+    Properties:
+      DBClusterIdentifier: !Ref NeptuneDBCluster
+      DBInstanceClass: !Ref DBInstanceType
+      DBInstanceIdentifier: 'test-neptune-primary'
+      DBParameterGroupName: !Ref NeptuneDBParameterGroup
+      Tags:
+        - Key: Name
+          Value: Neptune DB instance
+    DependsOn:
+      - NeptuneDBCluster
+      - NeptuneDBParameterGroup

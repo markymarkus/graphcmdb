@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Creates temporary ALB for Neptune'
+
+###############################################################################
+# Parameters 
+###############################################################################   
+
+Parameters:
+  ParentVPCStack:
+    Description: 'Provide Stack name of parent VPC stack.'
+    Type: String
+    MinLength: '1'
+    MaxLength: '128'
+    AllowedPattern: '^[a-zA-Z]+[0-9a-zA-Z\-]*$'
+
+###############################################################################
+# Resources 
+###############################################################################   
+
+Resources:
+  TempALBforDB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        - 'Fn::ImportValue': !Sub 'subpublic1-${ParentVPCStack}'
+        - 'Fn::ImportValue': !Sub 'subpublic2-${ParentVPCStack}'
+      SecurityGroups:
+        - !Ref NeptuneALBIn
+
+  NeptuneALBIn:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: NeptuneALBIn
+      VpcId:
+        'Fn::ImportValue': !Sub 'vpc-${ParentVPCStack}'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8182
+          ToPort: 8182
+          CidrIp: 0.0.0.0/0
+
+  ALBListeneTCP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TempALBforDB
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TGTempALB
+      Port: '8182'
+      Protocol: HTTP
+      LoadBalancerArn: !Ref TempALBforDB
+  TGTempALB:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Port: '8182'
+      Protocol: HTTP
+      TargetType: 'ip'
+      VpcId:
+        'Fn::ImportValue': !Sub 'vpc-${ParentVPCStack}'
+
+Outputs:
+  ALBName:
+    Description: 'ALB DNS name'
+    Value: !GetAtt TempALBforDB.DNSName      
