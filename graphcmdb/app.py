@@ -9,11 +9,13 @@ from gremlin_python import statics
 from gremlin_python.process.anonymous_traversal import traversal
 from gremlin_python.process.graph_traversal import __
 from gremlin_python.driver.driver_remote_connection import DriverRemoteConnection
+from urllib.parse import unquote_plus
 
 statics.load_statics(globals())
 g = traversal().withRemote(DriverRemoteConnection(os.environ['NEPTUNE_ENDPOINT'], 'g'))
 pp = pprint.PrettyPrinter(indent=4)
 
+TYPE_AWS_ACCOUNT = "AWS-Account"
 
 def datetime_parser(dct):
     for k, v in dct.items():
@@ -76,6 +78,7 @@ def add_properties(props, t):
                   'ipPermissions': None,
                   'ipPermissionsEgress': None,
                   'privateIpAddresses': None,
+                  'assumeRolePolicyDocument': None,
                   'tags': None}
 
     # configuration items related to the source configuration item will be stored in this dict
@@ -95,6 +98,17 @@ def add_properties(props, t):
                 for c in props[p]:
                     if c not in newcitypes.keys():
                         t = add_property(t, c, props[p][c])
+                    elif c =='assumeRolePolicyDocument':
+                        unquoted = unquote_plus(props[p][c])
+                        outjson = json.loads(unquoted)
+                        for st in outjson['Statement']:
+                            if "AWS" in st['Principal'].keys():
+                                # Looking for cross-account roles. No resourcetype available
+                                # for AWS Account, so using own type.
+                                account = st['Principal']['AWS'].split(":")[4]
+                                newcis[account] = (TYPE_AWS_ACCOUNT, "Assume-role", rid)
+                            elif "Federated" in st['Principal'].keys():
+                                # TODO: federated principals relationships. Cognito/SAML Idp/Google..
 
     return t, newcis
 
@@ -120,7 +134,7 @@ def process_config_event(ce):
             cis = ci['configurationItemStatus']
             cit = reformat_resource_type(ci['resourceType'])
 
-            if cis == 'OK':
+            if (cis == 'OK' or cis == 'ResourceDiscovered'):
                 # insert the primary configuration item
                 rn = ci['resourceName'] if 'resourceName' in ci.keys() and ci['resourceName'] is not None else ''
                 t = insert_or_update_config_item(ci['resourceId'], cit, rn)
